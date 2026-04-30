@@ -1,0 +1,160 @@
+# =========================================
+# OTIMIZADOR CNC FANCOIL - COMPLETO
+# =========================================
+
+print("=== OTIMIZADOR CNC FANCOIL ===")
+
+# -------------------------------
+# ENTRADA DE DADOS
+# -------------------------------
+
+largura_chapa = float(input("Largura da chapa (mm): "))
+altura_chapa = float(input("Altura da chapa (mm): "))
+
+diametro_fresa = float(input("Diâmetro da fresa (mm): "))
+espacamento = float(input("Espaçamento mínimo entre peças (mm): "))
+
+permitir_rotacao = input("Permitir rotação das peças? (s/n): ").lower() == "s"
+
+kerf = diametro_fresa
+
+# -------------------------------
+# PEÇAS
+# -------------------------------
+
+pecas = []
+qtd = int(input("Quantidade de peças: "))
+
+for i in range(qtd):
+    print(f"\nPeça {i+1}")
+    l = float(input("Largura: "))
+    a = float(input("Altura: "))
+    pecas.append({"id": i+1, "l": l, "a": a})
+
+# Ordena por maior dimensão (melhora encaixe)
+pecas.sort(key=lambda x: max(x["l"], x["a"]), reverse=True)
+
+# -------------------------------
+# ALGORITMO DE NESTING
+# -------------------------------
+
+x = 0
+y = 0
+linha_altura = 0
+
+resultado = []
+nao_couberam = []
+
+for p in pecas:
+    l = p["l"]
+    a = p["a"]
+
+    opcoes = [(l, a)]
+    if permitir_rotacao:
+        opcoes.append((a, l))
+
+    colocado = False
+
+    for (w, h) in opcoes:
+        largura_real = w + kerf + espacamento
+        altura_real = h + kerf + espacamento
+
+        if x + largura_real <= largura_chapa:
+            resultado.append({
+                "id": p["id"],
+                "x": x,
+                "y": y,
+                "w": w,
+                "h": h
+            })
+
+            x += largura_real
+            linha_altura = max(linha_altura, altura_real)
+            colocado = True
+            break
+
+    if not colocado:
+        # nova linha
+        x = 0
+        y += linha_altura
+        linha_altura = 0
+
+        colocado_linha = False
+
+        for (w, h) in opcoes:
+            largura_real = w + kerf + espacamento
+            altura_real = h + kerf + espacamento
+
+            if y + altura_real <= altura_chapa:
+                resultado.append({
+                    "id": p["id"],
+                    "x": x,
+                    "y": y,
+                    "w": w,
+                    "h": h
+                })
+
+                x += largura_real
+                linha_altura = max(linha_altura, altura_real)
+                colocado_linha = True
+                break
+
+        if not colocado_linha:
+            nao_couberam.append(p)
+
+# -------------------------------
+# RESULTADOS
+# -------------------------------
+
+print("\n=== LAYOUT FINAL ===")
+
+for r in resultado:
+    print(f"Peça {r['id']} -> X:{r['x']:.1f} Y:{r['y']:.1f} | {r['w']} x {r['h']} mm")
+
+if nao_couberam:
+    print("\n--- NÃO COUBERAM ---")
+    for p in nao_couberam:
+        print(f"Peça {p['id']} ({p['l']} x {p['a']})")
+
+# -------------------------------
+# APROVEITAMENTO
+# -------------------------------
+
+area_total = largura_chapa * altura_chapa
+area_usada = sum(r["w"] * r["h"] for r in resultado)
+
+print(f"\nAproveitamento: {(area_usada / area_total) * 100:.2f}%")
+
+# -------------------------------
+# EXPORTAÇÃO G-CODE (SIMPLES)
+# -------------------------------
+
+gerar_gcode = input("\nGerar G-code? (s/n): ").lower() == "s"
+
+if gerar_gcode:
+    print("\n=== GCODE GERADO ===")
+
+    print("G21 ; mm")
+    print("G90 ; absoluto")
+    print("G0 Z5")
+
+    for r in resultado:
+        x = r["x"]
+        y = r["y"]
+        w = r["w"]
+        h = r["h"]
+
+        print(f"\n; Peça {r['id']}")
+
+        print(f"G0 X{x} Y{y}")
+        print("G1 Z-2 F300")  # profundidade padrão (ajustável)
+
+        print(f"G1 X{x+w} Y{y}")
+        print(f"G1 X{x+w} Y{y+h}")
+        print(f"G1 X{x} Y{y+h}")
+        print(f"G1 X{x} Y{y}")
+
+        print("G0 Z5")
+
+    print("\nG0 X0 Y0")
+    print("M30")
